@@ -1,0 +1,205 @@
+# streamlit_app.py - Streamlit Frontend for Personal Finance Chatbot
+
+import streamlit as st
+import requests
+import json
+import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
+from datetime import datetime, timedelta
+from typing import Dict, List, Any
+import time
+
+# Configure Streamlit page
+st.set_page_config(
+    page_title="Personal Finance Assistant",
+    page_icon="💰",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# API Configuration
+API_BASE_URL = "http://localhost:8000"  # FastAPI backend URL
+
+# Custom CSS for better styling
+st.markdown("""
+<style>
+    .main-header {
+        font-size: 2.5rem;
+        font-weight: 700;
+        color: #1f2937;
+        text-align: center;
+        margin-bottom: 2rem;
+    }
+    
+    .chat-message-user {
+        background-color: #3b82f6;
+        color: white;
+        padding: 1rem;
+        border-radius: 10px;
+        margin: 0.5rem 0;
+        margin-left: 2rem;
+    }
+    
+    .chat-message-bot {
+        background-color: #f3f4f6;
+        color: #374151;
+        padding: 1rem;
+        border-radius: 10px;
+        margin: 0.5rem 0;
+        margin-right: 2rem;
+    }
+    
+    .metric-card {
+        background-color: #f8fafc;
+        padding: 1.5rem;
+        border-radius: 10px;
+        border-left: 4px solid #3b82f6;
+        margin: 1rem 0;
+    }
+    
+    .recommendation-item {
+        background-color: #ecfdf5;
+        border: 1px solid #a7f3d0;
+        border-radius: 8px;
+        padding: 1rem;
+        margin: 0.5rem 0;
+    }
+    
+    .sidebar-section {
+        background-color: #f9fafb;
+        padding: 1rem;
+        border-radius: 8px;
+        margin: 1rem 0;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# Initialize session state
+if 'chat_history' not in st.session_state:
+    st.session_state.chat_history = []
+if 'user_profile' not in st.session_state:
+    st.session_state.user_profile = None
+if 'budget_analysis' not in st.session_state:
+    st.session_state.budget_analysis = None
+
+# Utility Functions
+def make_api_request(endpoint: str, method: str = "GET", data: Dict = None) -> Dict:
+    """Make API request to FastAPI backend"""
+    try:
+        url = f"{API_BASE_URL}{endpoint}"
+        if method == "GET":
+            response = requests.get(url)
+        elif method == "POST":
+            response = requests.post(url, json=data)
+        else:
+            raise ValueError(f"Unsupported HTTP method: {method}")
+        
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.ConnectionError:
+        st.error("🔌 Cannot connect to the backend API. Please ensure the FastAPI server is running on http://localhost:8000")
+        return {"error": "Connection failed"}
+    except requests.exceptions.RequestException as e:
+        st.error(f"API request failed: {str(e)}")
+        return {"error": str(e)}
+
+def display_chat_message(message: str, is_user: bool = False):
+    """Display a chat message with appropriate styling"""
+    if is_user:
+        st.markdown(f'<div class="chat-message-user">💬 <strong>You:</strong> {message}</div>', unsafe_allow_html=True)
+    else:
+        st.markdown(f'<div class="chat-message-bot">🤖 <strong>Assistant:</strong> {message}</div>', unsafe_allow_html=True)
+
+def create_expense_pie_chart(expenses: Dict[str, float]) -> go.Figure:
+    """Create a pie chart for expense breakdown"""
+    fig = go.Figure(data=[go.Pie(
+        labels=list(expenses.keys()),
+        values=list(expenses.values()),
+        hole=0.3,
+        textinfo='label+percent',
+        textposition='outside'
+    )])
+    
+    fig.update_traces(
+        hovertemplate='<b>%{label}</b><br>$%{value:,.2f}<br>%{percent}<extra></extra>',
+        marker=dict(colors=px.colors.qualitative.Set3)
+    )
+    
+    fig.update_layout(
+        title="Monthly Expense Breakdown",
+        title_x=0.5,
+        showlegend=True,
+        legend=dict(orientation="h", yanchor="bottom", y=-0.2, xanchor="center", x=0.5),
+        height=400
+    )
+    
+    return fig
+
+def create_savings_progress_chart(current_savings: float, target: float) -> go.Figure:
+    """Create a progress chart for savings goal"""
+    progress_percentage = (current_savings / target * 100) if target > 0 else 0
+    
+    fig = go.Figure(go.Indicator(
+        mode="gauge+number+delta",
+        value=progress_percentage,
+        domain={'x': [0, 1], 'y': [0, 1]},
+        title={'text': "Savings Goal Progress (%)"},
+        delta={'reference': 100},
+        gauge={
+            'axis': {'range': [None, 100]},
+            'bar': {'color': "#3b82f6"},
+            'steps': [
+                {'range': [0, 50], 'color': "#fee2e2"},
+                {'range': [50, 80], 'color': "#fef3c7"},
+                {'range': [80, 100], 'color': "#dcfce7"}
+            ],
+            'threshold': {
+                'line': {'color': "red", 'width': 4},
+                'thickness': 0.75,
+                'value': 90
+            }
+        }
+    ))
+    
+    fig.update_layout(height=300)
+    return fig
+
+# Sidebar - User Profile Setup
+def setup_sidebar():
+    """Setup the sidebar with user profile and navigation"""
+    st.sidebar.markdown('<div class="sidebar-section">', unsafe_allow_html=True)
+    st.sidebar.title("👤 User Profile")
+    
+    # User type selection
+    user_type = st.sidebar.selectbox(
+        "I am a:",
+        ["Select...", "Student", "Professional"],
+        key="user_type_select"
+    )
+    
+    if user_type != "Select...":
+        # Income input
+        monthly_income = st.sidebar.number_input(
+            "Monthly Income ($)",
+            min_value=0.0,
+            value=0.0,
+            step=100.0,
+            key="income_input"
+        )
+        
+        # Expense categories
+        st.sidebar.subheader("📊 Monthly Expenses")
+        expenses = {}
+        
+        if user_type == "Student":
+            expense_categories = ["Tuition/Fees", "Rent/Housing", "Food", "Transportation", "Books/Supplies", "Other"]
+        else:
+            expense_categories = ["Rent/Mortgage", "Food", "Transportation", "Utilities", "Entertainment", "Healthcare", "Other"]
+        
+        for category in expense_categories:
+            expenses[category.lower().replace("/", "_")] = st.sidebar.number_input(
+                f"{category} ($)",
+                min_value=0.0,
+                value=0.0,
+                step=10.0,
