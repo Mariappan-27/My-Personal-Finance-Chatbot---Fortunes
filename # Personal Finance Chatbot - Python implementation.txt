@@ -1,0 +1,772 @@
+# Personal Finance Chatbot - Complete Python Implementation
+# This includes FastAPI backend, Watson AI integration, and Streamlit frontend
+
+# ================================
+# 1. MAIN APPLICATION (main.py)
+# ================================
+
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from typing import Dict, List, Optional, Any
+import os
+import json
+import uvicorn
+from datetime import datetime
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+app = FastAPI(
+    title="Personal Finance Chatbot API",
+    description="AI-powered financial advisor using IBM Watson services",
+    version="1.0.0"
+)
+
+# CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# ================================
+# 2. DATA MODELS (models.py)
+# ================================
+
+class UserProfile(BaseModel):
+    user_id: str
+    user_type: str  # "student" or "professional"
+    monthly_income: float
+    expenses: Dict[str, float]
+    financial_goals: Optional[List[str]] = []
+    risk_tolerance: Optional[str] = "moderate"
+    age: Optional[int] = None
+
+class ChatMessage(BaseModel):
+    message: str
+    user_profile: Optional[UserProfile] = None
+    session_id: Optional[str] = None
+
+class BudgetAnalysisRequest(BaseModel):
+    income: float
+    expenses: Dict[str, float]
+    user_type: str
+
+class SavingsGoalRequest(BaseModel):
+    goal_name: str
+    target_amount: float
+    current_savings: float
+    timeline_months: int
+    user_profile: UserProfile
+
+class ChatResponse(BaseModel):
+    response: str
+    insights: Optional[Dict[str, Any]] = None
+    recommendations: Optional[List[str]] = None
+    sentiment_analysis: Optional[Dict[str, Any]] = None
+    confidence_score: Optional[float] = None
+
+class BudgetSummary(BaseModel):
+    total_income: float
+    total_expenses: float
+    monthly_savings: float
+    savings_rate: float
+    top_expense_category: str
+    budget_health: str
+    recommendations: List[str]
+    expense_breakdown: Dict[str, float]
+
+# ================================
+# 3. IBM WATSON INTEGRATION (watson_service.py)
+# ================================
+
+class WatsonConfig:
+    """Configuration for IBM Watson services"""
+    def __init__(self):
+        self.nlu_apikey = os.getenv("IBM_NLU_APIKEY", "")
+        self.nlu_url = os.getenv("IBM_NLU_URL", "")
+        self.watsonx_apikey = os.getenv("IBM_WATSONX_APIKEY", "")
+        self.watsonx_project_id = os.getenv("IBM_WATSONX_PROJECT_ID", "")
+        self.watsonx_url = os.getenv("IBM_WATSONX_URL", "https://us-south.ml.cloud.ibm.com")
+
+class WatsonNLUService:
+    """IBM Watson Natural Language Understanding Service"""
+    
+    def __init__(self, config: WatsonConfig):
+        self.config = config
+        self.nlu = None
+        self._initialize_nlu()
+    
+    def _initialize_nlu(self):
+        """Initialize Watson NLU service"""
+        try:
+            from ibm_watson import NaturalLanguageUnderstandingV1
+            from ibm_watson.natural_language_understanding_v1 import Features, KeywordsOptions, SentimentOptions, EmotionOptions
+            from ibm_cloud_sdk_core.authenticators import IAMAuthenticator
+            
+            authenticator = IAMAuthenticator(self.config.nlu_apikey)
+            self.nlu = NaturalLanguageUnderstandingV1(
+                version='2022-04-07',
+                authenticator=authenticator
+            )
+            self.nlu.set_service_url(self.config.nlu_url)
+            logger.info("Watson NLU service initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize Watson NLU: {e}")
+            self.nlu = None
+    
+    def analyze_financial_text(self, text: str) -> Dict[str, Any]:
+        """Analyze financial text for sentiment, keywords, and intent"""
+        if not self.nlu:
+            return self._fallback_analysis(text)
+        
+        try:
+            from ibm_watson.natural_language_understanding_v1 import Features, KeywordsOptions, SentimentOptions, EmotionOptions
+            
+            response = self.nlu.analyze(
+                text=text,
+                features=Features(
+                    keywords=KeywordsOptions(limit=10, sentiment=True),
+                    sentiment=SentimentOptions(),
+                    emotion=EmotionOptions()
+                )
+            ).get_result()
+            
+            return {
+                "sentiment": response.get("sentiment", {}),
+                "emotion": response.get("emotion", {}),
+                "keywords": response.get("keywords", []),
+                "financial_intent": self._classify_financial_intent(text, response.get("keywords", [])),
+                "urgency_level": self._assess_urgency(response.get("emotion", {})),
+                "confidence": response.get("sentiment", {}).get("score", 0.5)
+            }
+        except Exception as e:
+            logger.error(f"NLU analysis failed: {e}")
+            return self._fallback_analysis(text)
+    
+    def _classify_financial_intent(self, text: str, keywords: List[Dict]) -> str:
+        """Classify the financial intent of the message"""
+        text_lower = text.lower()
+        keyword_texts = " ".join([kw.get("text", "").lower() for kw in keywords])
+        
+        intents = {
+            "budget_analysis": ["budget", "spending", "expenses", "analyze", "breakdown"],
+            "savings_goal": ["save", "goal", "emergency fund", "target", "plan"],
+            "debt_management": ["loan", "debt", "payment", "interest", "credit"],
+            "investment_advice": ["invest", "stocks", "retirement", "portfolio", "401k"],
+            "tax_help": ["tax", "deduction", "refund", "irs", "filing"],
+            "emotional_support": ["stress", "worried", "anxious", "overwhelmed", "help"],
+            "general_advice": ["advice", "what should", "recommend", "suggest"]
+        }
+        
+        for intent, keywords_list in intents.items():
+            if any(keyword in text_lower or keyword in keyword_texts for keyword in keywords_list):
+                return intent
+        
+        return "general_financial"
+    
+    def _assess_urgency(self, emotions: Dict) -> str:
+        """Assess urgency level based on emotional analysis"""
+        if not emotions:
+            return "normal"
+        
+        emotion_scores = emotions.get("document", {}).get("emotion", {})
+        
+        if emotion_scores.get("fear", 0) > 0.6 or emotion_scores.get("sadness", 0) > 0.7:
+            return "high"
+        elif emotion_scores.get("anger", 0) > 0.5:
+            return "medium"
+        else:
+            return "normal"
+    
+    def _fallback_analysis(self, text: str) -> Dict[str, Any]:
+        """Fallback analysis when Watson NLU is not available"""
+        return {
+            "sentiment": {"label": "neutral", "score": 0.5},
+            "emotion": {},
+            "keywords": [],
+            "financial_intent": self._classify_financial_intent(text, []),
+            "urgency_level": "normal",
+            "confidence": 0.5
+        }
+
+class WatsonxAIService:
+    """IBM Watsonx AI Service for generating financial advice"""
+    
+    def __init__(self, config: WatsonConfig):
+        self.config = config
+        self.model = None
+        self._initialize_model()
+    
+    def _initialize_model(self):
+        """Initialize Watsonx AI model"""
+        try:
+            from ibm_watsonx_ai.foundation_models import Model
+            from ibm_watsonx_ai.metanames import GenTextParamsMetaNames as GenParams
+            from ibm_watsonx_ai import Credentials
+            
+            credentials = Credentials(
+                url=self.config.watsonx_url,
+                api_key=self.config.watsonx_apikey
+            )
+            
+            self.model = Model(
+                model_id="ibm/granite-3-2-8b-instruct",
+                params={
+                    GenParams.DECODING_METHOD: "greedy",
+                    GenParams.MAX_NEW_TOKENS: 800,
+                    GenParams.TEMPERATURE: 0.7,
+                    GenParams.TOP_P: 0.9,
+                    GenParams.REPETITION_PENALTY: 1.1
+                },
+                credentials=credentials,
+                project_id=self.config.watsonx_project_id
+            )
+            logger.info("Watsonx AI model initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize Watsonx AI: {e}")
+            self.model = None
+    
+    def generate_financial_response(self, query: str, user_profile: Optional[UserProfile] = None,
+                                  nlu_analysis: Optional[Dict] = None) -> str:
+        """Generate AI-powered financial advice"""
+        if not self.model:
+            return self._fallback_response(query, user_profile, nlu_analysis)
+        
+        try:
+            prompt = self._build_financial_prompt(query, user_profile, nlu_analysis)
+            response = self.model.generate_text(prompt=prompt)
+            return self._clean_response(response)
+        except Exception as e:
+            logger.error(f"Watsonx generation failed: {e}")
+            return self._fallback_response(query, user_profile, nlu_analysis)
+    
+    def _build_financial_prompt(self, query: str, user_profile: Optional[UserProfile],
+                              nlu_analysis: Optional[Dict]) -> str:
+        """Build comprehensive prompt for financial advice generation"""
+        
+        # Base system prompt
+        system_prompt = """You are an expert financial advisor AI assistant. Your role is to provide helpful, accurate, and personalized financial guidance while being empathetic and supportive.
+
+Key Guidelines:
+1. Provide actionable, specific advice tailored to the user's situation
+2. Use appropriate tone based on user demographics (student vs professional)
+3. Include numbers and calculations when relevant
+4. Offer 3-5 concrete recommendations
+5. Be encouraging and supportive, especially for stressed users
+6. Focus on practical, achievable steps
+
+"""
+        
+        # Add user context
+        user_context = ""
+        if user_profile:
+            total_expenses = sum(user_profile.expenses.values())
+            savings = user_profile.monthly_income - total_expenses
+            savings_rate = (savings / user_profile.monthly_income * 100) if user_profile.monthly_income > 0 else 0
+            
+            user_context = f"""
+User Profile:
+- Type: {user_profile.user_type.title()}
+- Age: {user_profile.age or 'Not specified'}
+- Monthly Income: ${user_profile.monthly_income:,.2f}
+- Monthly Expenses: ${total_expenses:,.2f}
+- Monthly Savings: ${savings:,.2f}
+- Savings Rate: {savings_rate:.1f}%
+- Risk Tolerance: {user_profile.risk_tolerance}
+- Financial Goals: {', '.join(user_profile.financial_goals) if user_profile.financial_goals else 'None specified'}
+
+Expense Breakdown:
+"""
+            for category, amount in user_profile.expenses.items():
+                user_context += f"- {category.replace('_', ' ').title()}: ${amount:,.2f}\n"
+        
+        # Add NLU insights
+        nlu_context = ""
+        if nlu_analysis:
+            intent = nlu_analysis.get("financial_intent", "general")
+            sentiment = nlu_analysis.get("sentiment", {}).get("label", "neutral")
+            urgency = nlu_analysis.get("urgency_level", "normal")
+            
+            nlu_context = f"""
+Analysis Insights:
+- Detected Intent: {intent}
+- User Sentiment: {sentiment}
+- Urgency Level: {urgency}
+- Key Topics: {', '.join([kw.get('text', '') for kw in nlu_analysis.get('keywords', [])])}
+
+"""
+        
+        # Build complete prompt
+        full_prompt = f"""{system_prompt}
+
+{user_context}
+
+{nlu_context}
+
+User Question: "{query}"
+
+Please provide a comprehensive, personalized response that addresses the user's specific question while considering their profile and emotional state. Format your response clearly with actionable advice.
+
+Response:"""
+        
+        return full_prompt
+    
+    def _clean_response(self, response: str) -> str:
+        """Clean and format the AI response"""
+        # Remove any unwanted prefixes or suffixes
+        response = response.strip()
+        
+        # Ensure response doesn't exceed reasonable length
+        if len(response) > 2000:
+            response = response[:1997] + "..."
+        
+        return response
+    
+    def _fallback_response(self, query: str, user_profile: Optional[UserProfile],
+                         nlu_analysis: Optional[Dict]) -> str:
+        """Fallback response when Watsonx is not available"""
+        query_lower = query.lower()
+        
+        # Determine response based on intent
+        if "student loan" in query_lower or "debt" in query_lower:
+            return self._get_debt_advice(user_profile)
+        elif "budget" in query_lower or "spending" in query_lower:
+            return self._get_budget_advice(user_profile)
+        elif "save" in query_lower or "goal" in query_lower:
+            return self._get_savings_advice(user_profile)
+        elif "invest" in query_lower:
+            return self._get_investment_advice(user_profile)
+        elif "stress" in query_lower or "worried" in query_lower:
+            return self._get_emotional_support()
+        else:
+            return self._get_general_advice(user_profile)
+    
+    def _get_debt_advice(self, user_profile: Optional[UserProfile]) -> str:
+        if user_profile and user_profile.user_type == "student":
+            return """**Student Loan Management Strategy:**
+
+🎯 **Immediate Steps:**
+• Pay minimum amounts on all loans to avoid default
+• Focus on building a small emergency fund ($500-1000) first
+• Look into income-driven repayment plans to lower monthly payments
+
+💡 **Saving While Paying Loans:**
+• Use the debt avalanche method: pay minimums on all loans, extra on highest interest
+• Consider part-time work, tutoring, or freelance opportunities
+• Take advantage of student discounts and free campus resources
+• Automate small savings amounts ($25-50/month) to build the habit
+
+📈 **Long-term Strategy:**
+• Apply for loan forgiveness programs if eligible
+• Consider refinancing if you have good credit and stable income
+• Increase payments gradually as income grows"""
+        
+        return """**Debt Management for Professionals:**
+
+🎯 **Priority Actions:**
+• List all debts with balances, interest rates, and minimum payments
+• Choose debt avalanche (highest interest first) or snowball (smallest balance first)
+• Negotiate with creditors for better terms if struggling
+
+💰 **Optimization Strategies:**
+• Consider debt consolidation if it lowers overall interest rate
+• Maintain emergency fund while paying off high-interest debt
+• Use windfalls (bonuses, tax refunds) for debt reduction
+
+🚀 **Building Wealth:**
+• Once high-interest debt is cleared, redirect payments to investments
+• Take advantage of employer 401(k) matching while paying off debt"""
+    
+    def _get_budget_advice(self, user_profile: Optional[UserProfile]) -> str:
+        if not user_profile:
+            return """**Budget Analysis Framework:**
+
+📊 **Track Everything:**
+• Record all income sources and expenses for one month
+• Categorize expenses: needs vs wants
+• Use apps or spreadsheets to monitor spending
+
+💡 **The 50/30/20 Rule:**
+• 50% for needs (rent, food, utilities)
+• 30% for wants (entertainment, dining out)
+• 20% for savings and debt payments
+
+🎯 **Optimization Tips:**
+• Review subscriptions and cancel unused services
+• Cook more meals at home
+• Find free or low-cost entertainment alternatives"""
+        
+        total_expenses = sum(user_profile.expenses.values())
+        savings = user_profile.monthly_income - total_expenses
+        savings_rate = (savings / user_profile.monthly_income * 100) if user_profile.monthly_income > 0 else 0
+        
+        # Find top expense
+        top_expense = max(user_profile.expenses.items(), key=lambda x: x[1]) if user_profile.expenses else ("unknown", 0)
+        
+        return f"""**Your Personalized Budget Analysis:**
+
+💰 **Financial Snapshot:**
+• Monthly Income: ${user_profile.monthly_income:,.2f}
+• Total Expenses: ${total_expenses:,.2f}
+• Monthly Savings: ${savings:,.2f}
+• Savings Rate: {savings_rate:.1f}%
+
+🎯 **Key Insights:**
+• Your largest expense is {top_expense[0].replace('_', ' ').title()}: ${top_expense[1]:,.2f}
+• Budget Health: {"Excellent" if savings_rate > 20 else "Good" if savings_rate > 10 else "Needs Improvement"}
+
+📈 **Recommendations:**
+• {"Great job! Consider increasing investments" if savings_rate > 20 else f"Focus on reducing {top_expense[0].replace('_', ' ')} costs" if savings_rate < 10 else "Optimize your largest expense categories"}
+• {"Emergency fund next priority" if savings_rate > 0 else "Create additional income streams"}"""
+    
+    def _get_savings_advice(self, user_profile: Optional[UserProfile]) -> str:
+        return """**Smart Savings Strategies:**
+
+🎯 **Emergency Fund (Priority #1):**
+• Start with $1,000 for basic emergencies
+• Build to 3-6 months of expenses over time
+• Keep in high-yield savings account for easy access
+
+💡 **Savings Automation:**
+• Set up automatic transfers on payday
+• Start small ($25-50/month) and increase gradually
+• Use the "pay yourself first" principle
+
+🚀 **Goal-Based Saving:**
+• Define specific goals with target amounts and dates
+• Open separate accounts for different goals
+• Track progress weekly to stay motivated
+
+**Savings Rate Targets:**
+• Beginner: 5-10% of income
+• Intermediate: 10-20% of income
+• Advanced: 20%+ of income"""
+    
+    def _get_investment_advice(self, user_profile: Optional[UserProfile]) -> str:
+        if user_profile and user_profile.user_type == "student":
+            return """**Student Investment Guide:**
+
+🎓 **Start Simple:**
+• Focus on emergency fund and debt repayment first
+• Learn about investing through free online resources
+• Consider a Roth IRA for tax-free growth
+
+💡 **Low-Cost Options:**
+• Index funds with low expense ratios
+• Target-date funds for hands-off investing
+• Dollar-cost averaging with small monthly amounts
+
+⚠️ **Avoid:**
+• Individual stock picking as a beginner
+• High-fee investment products
+• Investing money you need within 5 years"""
+        
+        return """**Professional Investment Strategy:**
+
+🎯 **Foundation First:**
+• Maximize employer 401(k) matching (free money!)
+• Build emergency fund before aggressive investing
+• Pay off high-interest debt (>6-7% interest)
+
+📈 **Investment Allocation:**
+• Age-appropriate stock/bond mix (e.g., 90/10 for young professionals)
+• Diversified index funds as core holdings
+• Consider international exposure (20-30%)
+
+🚀 **Advanced Strategies:**
+• Max out retirement accounts (401k, IRA, HSA)
+• Taxable investment accounts for additional goals
+• Real estate investment when financially stable"""
+    
+    def _get_emotional_support(self) -> str:
+        return """**You're Not Alone in This Journey 💙**
+
+🌟 **Remember:**
+• Financial stress is completely normal - most people experience it
+• Small, consistent actions create big changes over time
+• You're already taking a positive step by seeking guidance
+
+💪 **Stress Management:**
+• Focus on one financial area at a time
+• Celebrate small wins (even saving $10 is progress!)
+• Don't compare your journey to others
+
+🎯 **Actionable First Steps:**
+• Write down your biggest financial concern
+• Choose ONE small action to take this week
+• Set up a simple tracking system (even a notebook works)
+
+**You've got this! Financial wellness is a journey, not a destination.**"""
+    
+    def _get_general_advice(self, user_profile: Optional[UserProfile]) -> str:
+        if user_profile and user_profile.user_type == "student":
+            return """**Financial Success Tips for Students:**
+
+📚 **Academic Phase Focus:**
+• Build good money habits early
+• Take advantage of student discounts everywhere
+• Learn about personal finance through free resources
+
+💰 **Income Strategies:**
+• Part-time work that builds skills
+• Freelancing in your area of study
+• Apply for scholarships and grants continuously
+
+🎯 **Future Preparation:**
+• Start building credit responsibly
+• Network and build professional relationships
+• Learn about salary negotiation before graduation"""
+        
+        return """**Financial Success for Professionals:**
+
+💼 **Career Phase Priorities:**
+• Maximize employer benefits and matching contributions
+• Build 6-month emergency fund as foundation
+• Invest consistently for long-term wealth building
+
+📈 **Growth Strategies:**
+• Increase savings rate with each raise
+• Diversify income streams when possible
+• Consider professional development as an investment
+
+🏡 **Life Goals Planning:**
+• Save for major purchases (home, car) separately
+• Plan for family expenses if applicable
+• Consider tax-efficient investment strategies"""
+
+# ================================
+# 4. FINANCIAL ANALYSIS ENGINE (financial_analyzer.py)
+# ================================
+
+class FinancialAnalyzer:
+    """Core financial analysis and calculation engine"""
+    
+    @staticmethod
+    def analyze_comprehensive_budget(income: float, expenses: Dict[str, float], 
+                                   user_type: str) -> BudgetSummary:
+        """Perform comprehensive budget analysis"""
+        total_expenses = sum(expenses.values())
+        monthly_savings = income - total_expenses
+        savings_rate = (monthly_savings / income * 100) if income > 0 else 0
+        
+        # Find top expense category
+        top_expense = max(expenses.items(), key=lambda x: x[1]) if expenses else ("unknown", 0)
+        
+        # Determine budget health
+        health_score = FinancialAnalyzer._calculate_budget_health(savings_rate, monthly_savings)
+        
+        # Generate smart recommendations
+        recommendations = FinancialAnalyzer._generate_smart_recommendations(
+            savings_rate, top_expense[0], user_type, monthly_savings, expenses, income
+        )
+        
+        return BudgetSummary(
+            total_income=income,
+            total_expenses=total_expenses,
+            monthly_savings=monthly_savings,
+            savings_rate=savings_rate,
+            top_expense_category=top_expense[0],
+            budget_health=health_score,
+            recommendations=recommendations,
+            expense_breakdown=expenses
+        )
+    
+    @staticmethod
+    def _calculate_budget_health(savings_rate: float, monthly_savings: float) -> str:
+        """Calculate overall budget health score"""
+        if monthly_savings < 0:
+            return "Critical - Expenses exceed income"
+        elif savings_rate >= 25:
+            return "Excellent - Outstanding financial discipline"
+        elif savings_rate >= 20:
+            return "Very Good - Strong savings habits"
+        elif savings_rate >= 15:
+            return "Good - Above average performance"
+        elif savings_rate >= 10:
+            return "Fair - Room for improvement"
+        elif savings_rate >= 5:
+            return "Below Average - Needs attention"
+        else:
+            return "Poor - Immediate action required"
+    
+    @staticmethod
+    def _generate_smart_recommendations(savings_rate: float, top_expense: str, 
+                                      user_type: str, monthly_savings: float,
+                                      expenses: Dict[str, float], income: float) -> List[str]:
+        """Generate intelligent, personalized recommendations"""
+        recommendations = []
+        
+        # Critical situation
+        if monthly_savings < 0:
+            deficit = abs(monthly_savings)
+            recommendations.extend([
+                f"🚨 URGENT: You're overspending by ${deficit:.2f} monthly",
+                f"💡 Immediately reduce {top_expense.replace('_', ' ')} spending by at least ${deficit:.2f}",
+                "📈 Explore additional income sources (freelance, part-time work)",
+                "📊 Track every expense for the next 30 days to identify waste"
+            ])
+        
+        # Low savings rate
+        elif savings_rate < 10:
+            recommendations.extend([
+                f"🎯 Target: Reduce {top_expense.replace('_', ' ')} by 10-15%",
+                "📱 Use budgeting apps to track spending in real-time",
+                "💰 Implement the 24-hour rule for non-essential purchases",
+                f"🎯 Aim to save an additional ${(income * 0.1) - monthly_savings:.2f}/month"
+            ])
+        
+        # Moderate savings rate
+        elif savings_rate < 20:
+            recommendations.extend([
+                "✅ Good progress! Focus on optimization now",
+                "🏦 Move savings to high-yield account (2-4% APY)",
+                "📈 Start investing surplus beyond emergency fund",
+                f"💡 Consider increasing savings rate to 20% (${income * 0.2:.2f}/month)"
+            ])
+        
+        # High savings rate
+        else:
+            recommendations.extend([
+                "🌟 Excellent savings discipline!",
+                "💼 Maximize retirement account contributions",
+                "🏠 Consider long-term investment goals",
+                "📊 Explore tax-advantaged investment strategies"
+            ])
+        
+        # User-type specific recommendations
+        if user_type == "student":
+            recommendations.extend([
+                "🎓 Apply for scholarships and grants regularly",
+                "📚 Use free campus resources (gym, library, events)",
+                "💳 Build credit history responsibly with student cards"
+            ])
+        else:
+            recommendations.extend([
+                "💼 Review employee benefits and maximize usage",
+                "🎯 Negotiate salary increases based on performance",
+                "📈 Consider professional development as ROI investment"
+            ])
+        
+        return recommendations[:6]  # Return top 6 recommendations
+    
+    @staticmethod
+    def calculate_savings_timeline(target_amount: float, current_savings: float,
+                                 monthly_contribution: float) -> Dict[str, Any]:
+        """Calculate detailed savings timeline and milestones"""
+        remaining_amount = target_amount - current_savings
+        
+        if monthly_contribution <= 0:
+            return {"error": "Monthly contribution must be positive"}
+        
+        months_to_goal = remaining_amount / monthly_contribution
+        
+        # Calculate milestones
+        milestones = []
+        for percentage in [25, 50, 75, 100]:
+            milestone_amount = target_amount * (percentage / 100)
+            months_to_milestone = max(0, (milestone_amount - current_savings) / monthly_contribution)
+            milestone_date = datetime.now() + timedelta(days=30 * months_to_milestone)
+            
+            milestones.append({
+                "percentage": percentage,
+                "amount": milestone_amount,
+                "months": round(months_to_milestone, 1),
+                "date": milestone_date.strftime("%B %Y")
+            })
+        
+        return {
+            "months_to_goal": round(months_to_goal, 1),
+            "remaining_amount": remaining_amount,
+            "completion_date": (datetime.now() + timedelta(days=30 * months_to_goal)).strftime("%B %Y"),
+            "weekly_target": round(monthly_contribution / 4.33, 2),
+            "daily_target": round(monthly_contribution / 30, 2),
+            "milestones": milestones,
+            "total_interest_potential": round(remaining_amount * 0.02 * (months_to_goal / 12), 2)  # 2% annual interest estimate
+        }
+    
+    @staticmethod
+    def generate_spending_insights(expenses: Dict[str, float], income: float) -> Dict[str, Any]:
+        """Generate detailed spending insights and patterns"""
+        total_expenses = sum(expenses.values())
+        
+        # Calculate expense percentages
+        expense_percentages = {
+            category: (amount / income * 100) if income > 0 else 0
+            for category, amount in expenses.items()
+        }
+        
+        # Sort expenses by amount
+        sorted_expenses = sorted(expenses.items(), key=lambda x: x[1], reverse=True)
+        
+        # Identify spending patterns
+        insights = {
+            "top_3_categories": sorted_expenses[:3],
+            "expense_percentages": expense_percentages,
+            "total_expense_ratio": (total_expenses / income * 100) if income > 0 else 0,
+            "recommendations": []
+        }
+        
+        # Generate specific insights
+        for category, amount in sorted_expenses[:3]:
+            percentage = expense_percentages[category]
+            category_name = category.replace('_', ' ').title()
+            
+            if percentage > 30:
+                insights["recommendations"].append(f"⚠️ {category_name} takes {percentage:.1f}% of income - consider reducing")
+            elif percentage > 20:
+                insights["recommendations"].append(f"💡 {category_name} is significant at {percentage:.1f}% - look for optimization")
+            else:
+                insights["recommendations"].append(f"✅ {category_name} at {percentage:.1f}% seems reasonable")
+        
+        return insights
+
+# ================================
+# 5. API ENDPOINTS
+# ================================
+
+# Initialize services
+watson_config = WatsonConfig()
+nlu_service = WatsonNLUService(watson_config)
+ai_service = WatsonxAIService(watson_config)
+
+@app.get("/")
+async def root():
+    return {
+        "message": "Personal Finance Chatbot API",
+        "version": "1.0.0",
+        "status": "active",
+        "endpoints": {
+            "chat": "/chat - Main chat interface",
+            "budget": "/analyze-budget - Budget analysis",
+            "savings": "/savings-goal - Savings goal planning",
+            "insights": "/financial-insights - Comprehensive insights",
+            "health": "/health - Service health check"
+        }
+    }
+
+@app.post("/chat", response_model=ChatResponse)
+async def chat_endpoint(request: ChatMessage):
+    """Main chat endpoint with full AI integration"""
+    try:
+        # Analyze message with Watson NLU
+        nlu_analysis = nlu_service.analyze_financial_text(request.message)
+        logger.info(f"NLU Analysis: {nlu_analysis.get('financial_intent', 'unknown')}")
+        
+        # Generate AI response
+        ai_response = ai_service.generate_financial_response(
+            request.message,
+            request.user_profile,
+            nlu_analysis
+        )
+        
+        # Generate additional insights if profile provided
+        insights = None
+        recommendations = None
+        
+        if request.user_profile:
