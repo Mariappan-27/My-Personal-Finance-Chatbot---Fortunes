@@ -1,0 +1,337 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { Send, User, Bot, TrendingUp, PiggyBank, Calculator, Target, Book, Briefcase } from 'lucide-react';
+
+const PersonalFinanceChatbot = () => {
+  const [messages, setMessages] = useState([]);
+  const [input, setInput] = useState('');
+  const [userType, setUserType] = useState('');
+  const [isTyping, setIsTyping] = useState(false);
+  const messagesEndRef = useRef(null);
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
+
+  useEffect(scrollToBottom, [messages]);
+
+  // Simulated AI responses based on user type and query
+  const generateResponse = (userInput, demographic) => {
+    const lowerInput = userInput.toLowerCase();
+    
+    // Different response styles based on user type
+    const responseStyle = demographic === 'student' ? {
+      tone: 'casual and encouraging',
+      complexity: 'simplified',
+      examples: 'student-friendly'
+    } : {
+      tone: 'professional and detailed',
+      complexity: 'comprehensive',
+      examples: 'career-focused'
+    };
+
+    // Budget and savings responses
+    if (lowerInput.includes('budget') || lowerInput.includes('saving')) {
+      if (demographic === 'student') {
+        return {
+          text: "Hey! Great question about budgeting! 🎓 As a student, I'd recommend the 50/30/20 rule: 50% for essentials (food, rent), 30% for wants (entertainment, dining out), and 20% for savings. Start small - even $25/month builds good habits! Want me to help create a personalized budget based on your income?",
+          suggestions: ["Create student budget plan", "Emergency fund for students", "Part-time income tips"]
+        };
+      } else {
+        return {
+          text: "Effective budgeting is foundational to financial success. I recommend implementing a zero-based budgeting approach where every dollar is allocated purposefully. For professionals, consider the 70/20/10 model: 70% living expenses, 20% savings/investments, 10% discretionary. Would you like me to analyze your specific income brackets and create a comprehensive budget framework?",
+          suggestions: ["Advanced budgeting strategies", "Tax-efficient savings", "Investment allocation models"]
+        };
+      }
+    }
+
+    // Investment responses
+    if (lowerInput.includes('invest') || lowerInput.includes('stock') || lowerInput.includes('portfolio')) {
+      if (demographic === 'student') {
+        return {
+          text: "Investing as a student is smart! 💡 Start with low-cost index funds or ETFs - they're like buying a tiny piece of many companies at once. Apps like fractional shares let you start with just $1! Focus on long-term growth since you have time on your side. Roth IRA is perfect for students - tax-free growth!",
+          suggestions: ["Beginner investment apps", "Student-friendly portfolios", "Understanding compound interest"]
+        };
+      } else {
+        return {
+          text: "Investment strategy should align with your career trajectory and risk tolerance. Consider diversified portfolio allocation: domestic equities (40-60%), international exposure (20-30%), bonds (10-20%), and alternative investments (5-10%). Tax-advantaged accounts (401k, IRA) should be maximized first. Current market volatility suggests defensive positioning with quality dividend stocks and recession-resistant sectors.",
+          suggestions: ["Portfolio rebalancing strategies", "Tax-loss harvesting", "Sector rotation analysis"]
+        };
+      }
+    }
+
+    // Tax responses
+    if (lowerInput.includes('tax') || lowerInput.includes('deduction')) {
+      if (demographic === 'student') {
+        return {
+          text: "Taxes as a student are usually pretty straightforward! 📚 You might get money back if you had a part-time job. Don't forget about education credits - American Opportunity Credit can get you up to $2,500 back! Keep receipts for textbooks and supplies. Most students can use free tax software too!",
+          suggestions: ["Student tax credits", "Free tax filing options", "Education expense deductions"]
+        };
+      } else {
+        return {
+          text: "Tax optimization requires strategic planning throughout the year. Key considerations include maximizing pre-tax contributions (401k, HSA), timing capital gains/losses, and leveraging available deductions. For professionals, consider tax-loss harvesting, backdoor Roth conversions, and municipal bonds for high earners. Q4 tax planning is crucial for year-end optimization.",
+          suggestions: ["Advanced tax strategies", "Year-end tax planning", "Business expense optimization"]
+        };
+      }
+    }
+
+    // Default response
+    return {
+      text: demographic === 'student' 
+        ? "I'm here to help with your financial journey! As a student, building good money habits now sets you up for success later. What specific area would you like to explore - budgeting, saving, or maybe investing basics?"
+        : "I'm equipped to provide comprehensive financial guidance across savings, investments, and tax strategies. My analysis adapts to your professional context and financial objectives. What specific financial area would you like to explore today?",
+      suggestions: ["Budget planning", "Investment strategies", "Tax optimization", "Emergency fund planning"]
+    };
+  };
+
+  const handleSend = () => {
+    if (!input.trim() || !userType) return;
+
+    const userMessage = { type: 'user', content: input, timestamp: new Date() };
+    setMessages(prev => [...prev, userMessage]);
+    setInput('');
+    setIsTyping(true);
+
+    // Simulate AI processing delay
+    setTimeout(() => {
+      const response = generateResponse(input, userType);
+      const botMessage = { 
+        type: 'bot', 
+        content: response.text, 
+        suggestions: response.suggestions,
+        timestamp: new Date() 
+      };
+      setMessages(prev => [...prev, botMessage]);
+      setIsTyping(false);
+    }, 1500);
+  };
+
+  const handleSuggestionClick = (suggestion) => {
+    setInput(suggestion);
+  };
+
+  const startChat = (type) => {
+    setUserType(type);
+    const welcomeMessage = {
+      type: 'bot',
+      content: type === 'student' 
+        ? "Hi there! 👋 I'm your personal finance assistant, optimized for students like you! I'll help you navigate budgeting, saving, and investing with advice that fits your student lifestyle. What financial topic would you like to explore?"
+        : "Welcome! I'm your comprehensive financial advisor, designed to provide professional-grade guidance on investments, tax strategies, and wealth management. I'm here to help optimize your financial portfolio and planning. How can I assist you today?",
+      suggestions: type === 'student' 
+        ? ["Help me create a student budget", "How to start investing with little money", "Student loan management tips"]
+        : ["Optimize my investment portfolio", "Tax-efficient retirement planning", "Advanced wealth building strategies"],
+      timestamp: new Date()
+    };
+    setMessages([welcomeMessage]);
+  };
+
+  if (!userType) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-green-50 flex items-center justify-center p-4">
+        <div className="max-w-2xl w-full">
+          <div className="text-center mb-8">
+            <div className="inline-flex items-center justify-center w-16 h-16 bg-blue-600 rounded-full mb-4">
+              <TrendingUp className="w-8 h-8 text-white" />
+            </div>
+            <h1 className="text-4xl font-bold text-gray-900 mb-2">Personal Finance AI</h1>
+            <p className="text-xl text-gray-600">Intelligent guidance powered by advanced AI</p>
+          </div>
+
+          <div className="grid md:grid-cols-2 gap-6">
+            <button
+              onClick={() => startChat('student')}
+              className="group relative overflow-hidden bg-white border-2 border-blue-200 rounded-xl p-8 hover:border-blue-400 transition-all duration-300 hover:shadow-lg"
+            >
+              <div className="absolute top-4 right-4">
+                <Book className="w-6 h-6 text-blue-500" />
+              </div>
+              <h3 className="text-2xl font-semibold text-gray-900 mb-3">Student Mode</h3>
+              <p className="text-gray-600 mb-4">Simplified advice for students starting their financial journey</p>
+              <div className="flex flex-wrap gap-2">
+                <span className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-sm">Budget basics</span>
+                <span className="px-3 py-1 bg-green-100 text-green-700 rounded-full text-sm">Saving tips</span>
+                <span className="px-3 py-1 bg-purple-100 text-purple-700 rounded-full text-sm">Simple investing</span>
+              </div>
+            </button>
+
+            <button
+              onClick={() => startChat('professional')}
+              className="group relative overflow-hidden bg-white border-2 border-green-200 rounded-xl p-8 hover:border-green-400 transition-all duration-300 hover:shadow-lg"
+            >
+              <div className="absolute top-4 right-4">
+                <Briefcase className="w-6 h-6 text-green-500" />
+              </div>
+              <h3 className="text-2xl font-semibold text-gray-900 mb-3">Professional Mode</h3>
+              <p className="text-gray-600 mb-4">Advanced strategies for career professionals and experienced investors</p>
+              <div className="flex flex-wrap gap-2">
+                <span className="px-3 py-1 bg-green-100 text-green-700 rounded-full text-sm">Tax optimization</span>
+                <span className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-sm">Portfolio analysis</span>
+                <span className="px-3 py-1 bg-orange-100 text-orange-700 rounded-full text-sm">Wealth building</span>
+              </div>
+            </button>
+          </div>
+
+          <div className="mt-8 text-center">
+            <p className="text-sm text-gray-500">Powered by IBM Watson AI • Natural Language Processing • Personalized Insights</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-50 flex flex-col">
+      {/* Header */}
+      <div className="bg-white border-b border-gray-200 p-4">
+        <div className="max-w-4xl mx-auto flex items-center justify-between">
+          <div className="flex items-center space-x-3">
+            <div className="flex items-center justify-center w-10 h-10 bg-blue-600 rounded-full">
+              <TrendingUp className="w-5 h-5 text-white" />
+            </div>
+            <div>
+              <h1 className="text-xl font-semibold text-gray-900">Personal Finance AI</h1>
+              <p className="text-sm text-gray-500">
+                {userType === 'student' ? 'Student Mode' : 'Professional Mode'} • 
+                <span className="text-green-600 ml-1">● Online</span>
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => {
+              setUserType('');
+              setMessages([]);
+            }}
+            className="text-sm text-gray-500 hover:text-gray-700 px-3 py-1 rounded-md hover:bg-gray-100"
+          >
+            Switch Mode
+          </button>
+        </div>
+      </div>
+
+      {/* Chat Area */}
+      <div className="flex-1 max-w-4xl mx-auto w-full flex flex-col">
+        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          {messages.map((message, index) => (
+            <div key={index} className={flex ${message.type === 'user' ? 'justify-end' : 'justify-start'}}>
+              <div className={flex max-w-xs lg:max-w-md xl:max-w-lg ${message.type === 'user' ? 'flex-row-reverse' : 'flex-row'} items-start space-x-3}>
+                <div className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center ${
+                  message.type === 'user' 
+                    ? 'bg-blue-600 text-white ml-3' 
+                    : 'bg-gray-600 text-white mr-3'
+                }`}>
+                  {message.type === 'user' ? <User className="w-4 h-4" /> : <Bot className="w-4 h-4" />}
+                </div>
+                
+                <div className={`rounded-lg px-4 py-2 ${
+                  message.type === 'user' 
+                    ? 'bg-blue-600 text-white' 
+                    : 'bg-white border border-gray-200 text-gray-900'
+                }`}>
+                  <p className="text-sm leading-relaxed">{message.content}</p>
+                  
+                  {message.suggestions && (
+                    <div className="mt-3 space-y-2">
+                      <p className="text-xs text-gray-500 font-medium">Suggested topics:</p>
+                      <div className="flex flex-wrap gap-2">
+                        {message.suggestions.map((suggestion, idx) => (
+                          <button
+                            key={idx}
+                            onClick={() => handleSuggestionClick(suggestion)}
+                            className="px-3 py-1 bg-blue-50 text-blue-700 rounded-full text-xs hover:bg-blue-100 transition-colors"
+                          >
+                            {suggestion}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          ))}
+          
+          {isTyping && (
+            <div className="flex justify-start">
+              <div className="flex items-start space-x-3">
+                <div className="flex-shrink-0 w-8 h-8 rounded-full bg-gray-600 text-white flex items-center justify-center">
+                  <Bot className="w-4 h-4" />
+                </div>
+                <div className="bg-white border border-gray-200 rounded-lg px-4 py-2">
+                  <div className="flex space-x-1">
+                    <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></div>
+                    <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{animationDelay: '0.1s'}}></div>
+                    <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{animationDelay: '0.2s'}}></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+          <div ref={messagesEndRef} />
+        </div>
+
+        {/* Quick Actions */}
+        <div className="px-4 py-2 bg-white border-t border-gray-200">
+          <div className="flex space-x-2 overflow-x-auto pb-2">
+            {userType === 'student' ? (
+              <>
+                <button onClick={() => handleSuggestionClick("Create a monthly budget with $500 income")} className="flex items-center space-x-2 px-3 py-2 bg-blue-50 text-blue-700 rounded-lg text-sm whitespace-nowrap hover:bg-blue-100">
+                  <Calculator className="w-4 h-4" />
+                  <span>Budget Calculator</span>
+                </button>
+                <button onClick={() => handleSuggestionClick("How to start an emergency fund")} className="flex items-center space-x-2 px-3 py-2 bg-green-50 text-green-700 rounded-lg text-sm whitespace-nowrap hover:bg-green-100">
+                  <PiggyBank className="w-4 h-4" />
+                  <span>Emergency Fund</span>
+                </button>
+                <button onClick={() => handleSuggestionClick("Best investment apps for beginners")} className="flex items-center space-x-2 px-3 py-2 bg-purple-50 text-purple-700 rounded-lg text-sm whitespace-nowrap hover:bg-purple-100">
+                  <TrendingUp className="w-4 h-4" />
+                  <span>Investing Basics</span>
+                </button>
+              </>
+            ) : (
+              <>
+                <button onClick={() => handleSuggestionClick("Analyze portfolio allocation for $100k salary")} className="flex items-center space-x-2 px-3 py-2 bg-blue-50 text-blue-700 rounded-lg text-sm whitespace-nowrap hover:bg-blue-100">
+                  <TrendingUp className="w-4 h-4" />
+                  <span>Portfolio Analysis</span>
+                </button>
+                <button onClick={() => handleSuggestionClick("Tax optimization strategies for high earners")} className="flex items-center space-x-2 px-3 py-2 bg-green-50 text-green-700 rounded-lg text-sm whitespace-nowrap hover:bg-green-100">
+                  <Calculator className="w-4 h-4" />
+                  <span>Tax Strategy</span>
+                </button>
+                <button onClick={() => handleSuggestionClick("Retirement planning for 30-year-old professional")} className="flex items-center space-x-2 px-3 py-2 bg-orange-50 text-orange-700 rounded-lg text-sm whitespace-nowrap hover:bg-orange-100">
+                  <Target className="w-4 h-4" />
+                  <span>Retirement Planning</span>
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* Input Area */}
+        <div className="p-4 bg-white border-t border-gray-200">
+          <div className="flex space-x-3">
+            <input
+              type="text"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyPress={(e) => e.key === 'Enter' && handleSend()}
+              placeholder={userType === 'student' ? "Ask me about budgeting, saving, or investing as a student..." : "Ask about investment strategies, tax optimization, or financial planning..."}
+              className="flex-1 border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            />
+            <button
+              onClick={handleSend}
+              disabled={!input.trim() || isTyping}
+              className="bg-blue-600 text-white rounded-lg px-4 py-2 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              <Send className="w-4 h-4" />
+            </button>
+          </div>
+          
+          <div className="mt-2 text-xs text-gray-500 text-center">
+            Powered by IBM Watson AI • Personalized Financial Guidance • Real-time Analysis
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default PersonalFinanceChatbot;
