@@ -1,0 +1,473 @@
+import streamlit as st
+import time
+import random
+from datetime import datetime
+import pandas as pd
+
+# Page configuration
+st.set_page_config(
+    page_title="Finance Buddy - AI Financial Advisor",
+    page_icon="🤖",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# Custom CSS for better styling
+st.markdown("""
+<style>
+    .main-header {
+        text-align: center;
+        padding: 1rem 0;
+        background: linear-gradient(90deg, #4f46e5, #7c3aed);
+        color: white;
+        border-radius: 10px;
+        margin-bottom: 2rem;
+    }
+    
+    .chat-message {
+        padding: 1rem;
+        border-radius: 10px;
+        margin: 0.5rem 0;
+        border-left: 4px solid #4f46e5;
+    }
+    
+    .user-message {
+        background-color: #e0e7ff;
+        border-left-color: #4f46e5;
+    }
+    
+    .bot-message {
+        background-color: #f3f4f6;
+        border-left-color: #10b981;
+    }
+    
+    .quick-action-btn {
+        background-color: #f8fafc;
+        border: 1px solid #e2e8f0;
+        border-radius: 5px;
+        padding: 0.5rem 1rem;
+        margin: 0.25rem;
+        cursor: pointer;
+        transition: all 0.2s;
+    }
+    
+    .metric-card {
+        background: white;
+        padding: 1rem;
+        border-radius: 10px;
+        border-left: 4px solid #4f46e5;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# Initialize session state
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+
+if "user_type" not in st.session_state:
+    st.session_state.user_type = "student"
+
+if "user_profile" not in st.session_state:
+    st.session_state.user_profile = {
+        "monthly_income": 0,
+        "monthly_expenses": 0,
+        "savings_goal": 0,
+        "risk_tolerance": "moderate"
+    }
+
+class FinancialAdvisor:
+    """
+    Financial Advisor class that will integrate with IBM Watson and Hugging Face
+    """
+    
+    def _init_(self, user_type="student"):
+        self.user_type = user_type
+        
+    def get_welcome_message(self):
+        """Generate welcome message based on user type"""
+        if self.user_type == "student":
+            return """Hey there! 👋 I'm your personal finance buddy! Whether you're trying to stretch that ramen budget or figure out student loans, I'm here to help. What's on your mind?"""
+        else:
+            return """Good day! I'm your personal finance advisor. I'm here to provide comprehensive guidance on investments, tax optimization, retirement planning, and advanced financial strategies. How may I assist you today?"""
+    
+    def analyze_query(self, message):
+        """
+        This is where you'll integrate IBM Watson NLP for intent recognition
+        For now, using simple keyword matching
+        """
+        message_lower = message.lower()
+        
+        # Budget-related queries
+        if any(word in message_lower for word in ['budget', 'spending', 'expenses', 'money management']):
+            return 'budget'
+        
+        # Investment queries
+        elif any(word in message_lower for word in ['invest', 'stock', 'portfolio', 'shares', 'mutual fund']):
+            return 'investment'
+        
+        # Savings queries
+        elif any(word in message_lower for word in ['save', 'savings', 'emergency fund', 'deposit']):
+            return 'savings'
+        
+        # Tax queries
+        elif any(word in message_lower for word in ['tax', 'deduction', 'filing', 'refund']):
+            return 'tax'
+        
+        # Loan/debt queries
+        elif any(word in message_lower for word in ['loan', 'debt', 'credit', 'mortgage']):
+            return 'debt'
+            
+        else:
+            return 'general'
+    
+    def generate_response(self, message, intent):
+        """
+        Generate response based on intent and user type
+        This is where you'll integrate IBM Granite model
+        """
+        responses = {
+            'budget': {
+                'student': """Let's break down your budget! 📊 Start with the basics: income (part-time job, allowance), then essential expenses (tuition, rent, food). 
+
+Try the student-friendly 60/30/10 rule:
+• 60% - Needs (tuition, rent, groceries)
+• 30% - Wants (entertainment, dining out)  
+• 10% - Savings (even $20/month builds great habits!)
+
+Pro tip: Use apps like Mint or YNAB to track everything automatically!""",
+                
+                'professional': """For comprehensive budget optimization, I recommend implementing a zero-based budgeting framework:
+
+• Fixed Expenses: 50% (housing, utilities, insurance)
+• Discretionary Spending: 30% (entertainment, dining, hobbies)
+• Savings & Investments: 20% (401k, IRA, emergency fund)
+
+Consider maximizing tax-advantaged accounts first, then focus on expense categorization and variance analysis to identify optimization opportunities."""
+            },
+            
+            'investment': {
+                'student': """Investing as a student? Smart move! 🚀 
+
+Start small and simple:
+• Index funds (like buying a piece of the whole stock market)
+• Apps like Robinhood, Fidelity, or Schwab for $0 commissions
+• Even $25/month can grow to thousands by graduation!
+• Focus on low-cost index funds (expense ratios under 0.2%)
+
+Remember: Time is your biggest advantage. Start now, even with small amounts!""",
+                
+                'professional': """For optimal portfolio construction, consider modern portfolio theory principles:
+
+Asset Allocation Framework:
+• Equities: 60-70% (domestic/international mix)
+• Fixed Income: 20-30% (bonds, TIPS)
+• Alternatives: 5-10% (REITs, commodities)
+
+Implement dollar-cost averaging with low-expense ratio index funds. Consider tax-loss harvesting and strategic rebalancing quarterly."""
+            },
+            
+            'savings': {
+                'student': """Emergency fund on a student budget? Totally doable! 💪
+
+Start with mini-goals:
+• Target: $500 first (covers most student emergencies)
+• Save loose change and skip one coffee per week = $10/week
+• Use high-yield savings accounts (some offer 4%+)
+• In 1 year: $500 emergency fund complete!
+
+Every dollar saved is a dollar of freedom and peace of mind!""",
+                
+                'professional': """Emergency fund strategy should align with your risk profile:
+
+Recommended Structure:
+• 6-8 months of expenses in liquid savings
+• High-yield savings accounts (currently ~4-5% APY)
+• Consider CD laddering for better returns
+• Money market accounts for larger balances
+
+For surplus funds, explore Treasury bills or short-term bond funds for optimal yield with capital preservation."""
+            },
+            
+            'tax': {
+                'student': """Taxes as a student can actually work in your favor! 📚
+
+Key benefits:
+• American Opportunity Tax Credit: Up to $2,500 back for education expenses
+• Keep receipts for textbooks, supplies, laptop
+• If you work part-time, you might get money back
+• TurboTax Free Edition usually covers student situations perfectly
+
+File even if you don't owe - you might get money back!""",
+                
+                'professional': """Strategic tax optimization opportunities:
+
+Pre-tax Contributions:
+• Maximize 401(k) contribution ($23,000 limit)
+• Traditional IRA contributions ($7,000 limit)
+• HSA triple-tax advantage ($4,300 individual)
+
+Additional Strategies:
+• Tax-loss harvesting in taxable accounts
+• Strategic Roth conversions during lower-income years
+• Itemized deductions vs. standard deduction analysis"""
+            },
+            
+            'debt': {
+                'student': """Managing student debt? You've got this! 💪
+
+Smart strategies:
+• Federal loans usually have better terms than private
+• Look into income-driven repayment plans
+• Pay interest while in school if possible
+• Consider public service loan forgiveness if going into qualifying careers
+
+Focus on high-interest debt first, but don't skip building emergency savings entirely!""",
+                
+                'professional': """Debt optimization strategy:
+
+Prioritization Framework:
+1. High-interest consumer debt (>10% APR)
+2. Variable rate loans during rising rate environment  
+3. Tax-advantaged vs. debt payoff analysis
+
+Consider debt consolidation or refinancing opportunities. For mortgage debt, analyze extra payments vs. investment returns in current market conditions."""
+            },
+            
+            'general': {
+                'student': [
+                    "That's a great question! 💭 Personal finance can seem overwhelming, but you're already ahead by asking. What specific area interests you most?",
+                    "I love that you're thinking about your finances! 🌟 Whether it's budgeting, saving, or investing, I'm here to help. What's your biggest money challenge?",
+                    "Financial literacy is such a valuable skill! 📈 What would be most helpful for your current situation?"
+                ],
+                'professional': [
+                    "I'd be happy to provide detailed analysis. Could you specify whether you're looking for investment guidance, tax optimization, or retirement planning advice?",
+                    "That's an excellent financial planning question. Would you like me to focus on short-term liquidity management or long-term wealth accumulation?",
+                    "I can offer comprehensive insights. To provide the most relevant guidance, could you clarify your investment timeline and risk tolerance?"
+                ]
+            }
+        }
+        
+        if intent == 'general':
+            return random.choice(responses[intent][self.user_type])
+        else:
+            return responses[intent][self.user_type]
+
+def generate_budget_summary(income, expenses):
+    """Generate AI budget summary - integrate with IBM Watson here"""
+    savings_rate = ((income - expenses) / income * 100) if income > 0 else 0
+    
+    if savings_rate >= 20:
+        assessment = "Excellent! You're saving at a healthy rate."
+        color = "green"
+    elif savings_rate >= 10:
+        assessment = "Good progress! Consider increasing savings if possible."
+        color = "orange"
+    else:
+        assessment = "Focus on reducing expenses or increasing income."
+        color = "red"
+    
+    return {
+        'savings_rate': savings_rate,
+        'assessment': assessment,
+        'color': color,
+        'monthly_surplus': income - expenses
+    }
+
+def main():
+    # Header
+    st.markdown("""
+    <div class="main-header">
+        <h1>🤖 Finance Buddy</h1>
+        <p>Your AI-Powered Personal Financial Advisor</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Sidebar for user settings and profile
+    with st.sidebar:
+        st.header("👤 User Profile")
+        
+        # User type selection
+        user_type = st.selectbox(
+            "Select User Type:",
+            ["student", "professional"],
+            index=0 if st.session_state.user_type == "student" else 1
+        )
+        
+        if user_type != st.session_state.user_type:
+            st.session_state.user_type = user_type
+            st.session_state.messages = []  # Reset chat when switching
+        
+        st.markdown("---")
+        
+        # User profile inputs
+        st.subheader("📊 Financial Profile")
+        st.session_state.user_profile["monthly_income"] = st.number_input(
+            "Monthly Income ($)", 
+            min_value=0, 
+            value=st.session_state.user_profile["monthly_income"],
+            step=100
+        )
+        
+        st.session_state.user_profile["monthly_expenses"] = st.number_input(
+            "Monthly Expenses ($)", 
+            min_value=0, 
+            value=st.session_state.user_profile["monthly_expenses"],
+            step=100
+        )
+        
+        st.session_state.user_profile["savings_goal"] = st.number_input(
+            "Monthly Savings Goal ($)", 
+            min_value=0, 
+            value=st.session_state.user_profile["savings_goal"],
+            step=50
+        )
+        
+        st.session_state.user_profile["risk_tolerance"] = st.selectbox(
+            "Risk Tolerance:",
+            ["conservative", "moderate", "aggressive"]
+        )
+        
+        # Generate budget summary if data available
+        if st.session_state.user_profile["monthly_income"] > 0:
+            st.markdown("---")
+            st.subheader("📈 Budget Summary")
+            
+            summary = generate_budget_summary(
+                st.session_state.user_profile["monthly_income"],
+                st.session_state.user_profile["monthly_expenses"]
+            )
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                st.metric("Savings Rate", f"{summary['savings_rate']:.1f}%")
+            with col2:
+                st.metric("Monthly Surplus", f"${summary['monthly_surplus']}")
+            
+            st.markdown(f"*Assessment:* {summary['assessment']}")
+    
+    # Main chat interface
+    advisor = FinancialAdvisor(st.session_state.user_type)
+    
+    # Initialize with welcome message
+    if not st.session_state.messages:
+        welcome_msg = advisor.get_welcome_message()
+        st.session_state.messages.append({
+            "role": "assistant", 
+            "content": welcome_msg,
+            "timestamp": datetime.now()
+        })
+    
+    # Quick action buttons
+    st.subheader("🚀 Quick Actions")
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        if st.button("📊 Create Budget"):
+            prompt = "Help me create a monthly budget"
+            st.session_state.messages.append({
+                "role": "user", 
+                "content": prompt,
+                "timestamp": datetime.now()
+            })
+    
+    with col2:
+        if st.button("📈 Investment Tips"):
+            prompt = "What are some good investment strategies for beginners?"
+            st.session_state.messages.append({
+                "role": "user", 
+                "content": prompt,
+                "timestamp": datetime.now()
+            })
+    
+    with col3:
+        if st.button("💰 Save Money"):
+            prompt = "How can I save more money each month?"
+            st.session_state.messages.append({
+                "role": "user", 
+                "content": prompt,
+                "timestamp": datetime.now()
+            })
+    
+    with col4:
+        if st.button("🏦 Tax Help"):
+            prompt = "What tax deductions should I know about?"
+            st.session_state.messages.append({
+                "role": "user", 
+                "content": prompt,
+                "timestamp": datetime.now()
+            })
+    
+    st.markdown("---")
+    
+    # Display chat messages
+    for message in st.session_state.messages:
+        with st.chat_message(message["role"]):
+            st.write(message["content"])
+            st.caption(f"⏰ {message['timestamp'].strftime('%H:%M')}")
+    
+    # Chat input
+    if prompt := st.chat_input(f"Ask me about {'budgeting, saving, or investing' if user_type == 'student' else 'financial planning, investments, or tax strategies'}..."):
+        # Add user message
+        st.session_state.messages.append({
+            "role": "user", 
+            "content": prompt,
+            "timestamp": datetime.now()
+        })
+        
+        with st.chat_message("user"):
+            st.write(prompt)
+        
+        # Generate AI response
+        with st.chat_message("assistant"):
+            with st.spinner("Thinking..."):
+                time.sleep(1)  # Simulate processing time
+                
+                # Analyze intent and generate response
+                intent = advisor.analyze_query(prompt)
+                response = advisor.generate_response(prompt, intent)
+                
+                st.write(response)
+                
+                # Add response to session state
+                st.session_state.messages.append({
+                    "role": "assistant", 
+                    "content": response,
+                    "timestamp": datetime.now()
+                })
+        
+        st.rerun()
+
+if _name_ == "_main_":
+    main()
+
+# Integration Points for IBM Watson and Hugging Face:
+
+# 1. Replace advisor.analyze_query() with IBM Watson NLP:
+"""
+from ibm_watson import NaturalLanguageUnderstandingV1
+from ibm_watson.natural_language_understanding_v1 import Features, CategoriesOptions
+
+def watson_analyze_intent(text):
+    nlu = NaturalLanguageUnderstandingV1(version='2021-08-01', iam_apikey='your_api_key', url='your_url')
+    response = nlu.analyze(text=text, features=Features(categories=CategoriesOptions(limit=3))).get_result()
+    return response
+"""
+
+# 2. Replace advisor.generate_response() with IBM Granite model:
+"""
+from huggingface_hub import InferenceClient
+
+def granite_generate_response(prompt, user_type):
+    client = InferenceClient("your_granite_model")
+    enhanced_prompt = f"As a financial advisor for a {user_type}, respond to: {prompt}"
+    response = client.text_generation(enhanced_prompt, max_new_tokens=200)
+    return response
+"""
+
+# 3. Add budget analysis with IBM Watson Analytics:
+"""
+def watson_budget_analysis(financial_data):
+    # Use Watson's data analysis capabilities for deeper budget insights
+    pass
+"""
